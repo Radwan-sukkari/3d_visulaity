@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>3D Visualizer - MVP</title>
+    <link rel="stylesheet" href="./style.css" />
+</head>
+
+<body>
+    <div id="ui">
+        <input id="fileInput" type="file" accept=".ply,.obj" />
+        <button id="btn-plane">Plane Segmentation</button>
+        <button id="btn-spline">Draw Trajectory</button>
+        <div id="status">Status: Ready</div>
+        <div id="objectList">
+            <strong>Objects:</strong>
+            <div id="objectItems"></div>
+        </div>
+    </div>
+
+    <div id="canvasContainer"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="./app.js"></script>
+</body>
+
+</html>
