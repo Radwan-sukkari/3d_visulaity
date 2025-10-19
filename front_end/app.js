@@ -174,7 +174,6 @@ btnSpline.addEventListener('click', () => {
 
 // ==================== File Loading ====================
 
-// دالة بسيطة لتحميل OBJ
 function parseOBJ(text) {
     const vertices = [];
     const faces = [];
@@ -353,3 +352,208 @@ window.addEventListener("resize", () => {
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
+
+// ==================== Backend Integration ====================
+
+const API_BASE_URL = 'http://localhost:5000';
+
+// متغيرات لتتبع النقاط المختارة
+let selectedPoints = [];
+let selectionMode = null; // 'plane' أو 'spline'
+let selectionMarkers = [];
+
+// تفعيل اختيار النقاط
+function enablePointSelection(mode) {
+    selectionMode = mode;
+    selectedPoints = [];
+    clearSelectionMarkers();
+
+    statusDiv.textContent = `Status: Click on points in the scene (${mode} mode)`;
+    renderer.domElement.style.cursor = 'crosshair';
+}
+
+// مسح علامات الاختيار
+function clearSelectionMarkers() {
+    selectionMarkers.forEach(marker => scene.remove(marker));
+    selectionMarkers = [];
+}
+
+// إضافة علامة عند النقطة المختارة
+function addSelectionMarker(point) {
+    const markerGeometry = new THREE.SphereGeometry(0.05, 8, 8);
+    const markerMaterial = new THREE.MeshBasicMaterial({
+        color: selectionMode === 'plane' ? 0xff0000 : 0x00ff00
+    });
+    const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+    marker.position.set(point[0], point[1], point[2]);
+    scene.add(marker);
+    selectionMarkers.push(marker);
+}
+
+// معالج النقر على المشهد
+renderer.domElement.addEventListener('click', (event) => {
+    if (!selectionMode) return;
+
+    // حساب موقع الماوس المعياري
+    const rect = renderer.domElement.getBoundingClientRect();
+    const mouse = new THREE.Vector2();
+    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    // Raycasting
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(mouse, camera);
+
+    // ابحث عن التقاطعات مع الكائنات
+    const objects = sceneObjects.map(obj => obj.object).filter(obj => obj.visible);
+    const intersects = raycaster.intersectObjects(objects, true);
+
+    if (intersects.length > 0) {
+        const point = intersects[0].point;
+        const pointArray = [point.x, point.y, point.z];
+        selectedPoints.push(pointArray);
+        addSelectionMarker(pointArray);
+
+        statusDiv.textContent = `Status: Selected ${selectedPoints.length} points`;
+    }
+});
+
+// Plane Segmentation
+btnPlane.addEventListener('click', async () => {
+    if (selectionMode === 'plane') {
+        // إرسال للـ Backend
+        if (selectedPoints.length < 100) {
+            statusDiv.textContent = 'Status: Please select more points (min 100 recommended)';
+            return;
+        }
+
+        statusDiv.textContent = 'Status: Processing plane segmentation...';
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/segment_plane`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    points: selectedPoints,
+                    threshold: 0.05,
+                    max_iterations: 1000
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            // رسم المستوى
+            drawPlane(data.plane);
+
+            statusDiv.textContent = `Status: Found plane with ${data.num_inliers} inliers`;
+
+            // إعادة تعيين
+            selectionMode = null;
+            renderer.domElement.style.cursor = 'default';
+
+        } catch (error) {
+            console.error('Error:', error);
+            statusDiv.textContent = `Status: Error - ${error.message}`;
+        }
+
+    } else {
+        // تفعيل وضع الاختيار
+        enablePointSelection('plane');
+    }
+});
+
+// Draw Trajectory (B-Spline)
+btnSpline.addEventListener('click', async () => {
+    if (selectionMode === 'spline') {
+        // إرسال للـ Backend
+        if (selectedPoints.length < 2) {
+            statusDiv.textContent = 'Status: Please select at least 2 control points';
+            return;
+        }
+
+        statusDiv.textContent = 'Status: Computing trajectory...';
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/bspline`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    control_points: selectedPoints,
+                    degree: 3,
+                    num_samples: 100,
+                    method: 'catmull-rom' // أو 'bspline'
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            // رسم المنحنى
+            drawSpline(data.curve_points);
+
+            statusDiv.textContent = `Status: Drew trajectory with ${data.num_points} points`;
+
+            // إعادة تعيين
+            selectionMode = null;
+            renderer.domElement.style.cursor = 'default';
+
+        } catch (error) {
+            console.error('Error:', error);
+            statusDiv.textContent = `Status: Error - ${error.message}`;
+        }
+
+    } else {
+        // تفعيل وضع الاختيار
+        enablePointSelection('spline');
+    }
+});
+
+// رسم المستوى
+function drawPlane(planeData) {
+    const planeGeometry = new THREE.PlaneGeometry(5, 5);
+    const planeMaterial = new THREE.MeshStandardMaterial({
+        color: 0xff6b6b,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.5
+    });
+
+    const planeMesh = new THREE.Mesh(planeGeometry, planeMaterial);
+
+    // ضع المستوى في الموقع الصحيح
+    const normal = new THREE.Vector3(...planeData.normal);
+    const point = new THREE.Vector3(...planeData.point);
+
+    planeMesh.position.copy(point);
+    planeMesh.lookAt(point.clone().add(normal));
+
+    scene.add(planeMesh);
+    addObjectToList('Segmented Plane', planeMesh);
+
+    clearSelectionMarkers();
+}
+
+// رسم المنحنى
+function drawSpline(curvePoints) {
+    const points = curvePoints.map(p => new THREE.Vector3(p[0], p[1], p[2]));
+
+    const curveGeometry = new THREE.BufferGeometry().setFromPoints(points);
+    const curveMaterial = new THREE.LineBasicMaterial({
+        color: 0x00ff00,
+        linewidth: 3
+    });
+
+    const curveLine = new THREE.Line(curveGeometry, curveMaterial);
+
+    scene.add(curveLine);
+    addObjectToList('Trajectory', curveLine);
+
+    clearSelectionMarkers();
+}
